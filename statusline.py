@@ -442,13 +442,22 @@ def _keychain_service_name():
     return f"Claude Code-credentials-{suffix}"
 
 
+def _cache_dir():
+    """Return a user-private cache directory (mode 700), respecting XDG on Linux."""
+    xdg = os.environ.get("XDG_CACHE_HOME", "")
+    base = xdg if xdg else os.path.join(os.path.expanduser("~"), ".cache")
+    d = os.path.join(base, "claude-statusline")
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    return d
+
+
 def _cache_path():
     """Per-account usage cache path, keyed by CLAUDE_CONFIG_DIR."""
     config_dir = os.environ.get("CLAUDE_CONFIG_DIR", "")
     if config_dir:
         suffix = hashlib.sha256(os.path.expanduser(config_dir).encode()).hexdigest()[:8]
-        return f"/tmp/claude-usage-cache-{suffix}.json"
-    return "/tmp/claude-usage-cache.json"
+        return os.path.join(_cache_dir(), f"usage-{suffix}.json")
+    return os.path.join(_cache_dir(), "usage.json")
 
 
 CACHE_TTL = 300  # 5 minutes — reduces frequency of API calls → fewer 429s
@@ -626,7 +635,7 @@ def _get_loaded_skills(tpath):
         cache_key = f"{st.st_mtime_ns}:{st.st_size}"
     except OSError:
         return []
-    cache_file = f"/tmp/claude-skills-cache-{hashlib.md5(tpath.encode()).hexdigest()}.json"
+    cache_file = os.path.join(_cache_dir(), f"skills-{hashlib.md5(tpath.encode()).hexdigest()}.json")
     try:
         with open(cache_file) as f:
             cached = json.load(f)
