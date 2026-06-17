@@ -487,12 +487,15 @@ def _read_credentials_raw():
             return json.load(f)
 
 
-def get_credentials_info():
-    creds = _read_credentials_raw()
-    oauth = creds.get("claudeAiOauth", {})
-    token = oauth.get("accessToken", "")
-    tier = oauth.get("rateLimitTier", "")
-    sub = oauth.get("subscriptionType", "").lower()
+def classify_plan(tier, sub):
+    """Map a rate-limit tier string + subscription type to a display label.
+
+    Accepts the same string formats from both the credential file
+    (``rateLimitTier``/``subscriptionType``) and the OAuth profile endpoint
+    (``organization.rate_limit_tier`` / derived subscription).
+    """
+    tier = tier or ""
+    sub = (sub or "").lower()
 
     if "team" in tier or "team" in sub:
         if "premium" in tier or "premium" in sub or "5x" in tier:
@@ -514,6 +517,14 @@ def get_credentials_info():
     else:
         plan = "API"
 
+    return plan
+
+
+def get_credentials_info():
+    oauth = _read_credentials_raw().get("claudeAiOauth", {})
+    token = oauth.get("accessToken", "")
+    plan = classify_plan(oauth.get("rateLimitTier", ""),
+                         oauth.get("subscriptionType", ""))
     return token, plan
 
 
@@ -523,6 +534,57 @@ def fetch_usage(token):
     req.add_header("anthropic-beta", "oauth-2025-04-20")
     with urlopen(req, timeout=5) as resp:
         return json.loads(resp.read())
+
+
+def fetch_profile(token):
+    """Fetch the live plan from the OAuth profile endpoint (same auth as usage).
+
+    The endpoint is undocumented, so callers must treat failures as non-fatal
+    and fall back to the (possibly stale) credential file.
+    """
+    req = Request("https://api.anthropic.com/api/oauth/profile")
+    req.add_header("Authorization", f"Bearer {token}")
+    req.add_header("anthropic-beta", "oauth-2025-04-20")
+    with urlopen(req, timeout=5) as resp:
+        return json.loads(resp.read())
+
+
+def _plan_override():
+    """Manual plan label override: env var wins, then statusline.json config.
+
+    Returns a literal display label (e.g. "Max 5x"), not a tier string — it is
+    NOT passed through classify_plan. Empty string means "no override".
+    """
+    v = os.environ.get("CLAUDE_STATUSLINE_PLAN", "").strip()
+    if v:
+        return v
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
+        os.path.expanduser("~"), ".claude")
+    try:
+        with open(os.path.join(os.path.expanduser(cfg), "statusline.json")) as f:
+            return (json.load(f).get("plan_override") or "").strip()
+    except Exception:
+        return ""
+
+
+def resolve_plan(token, oauth):
+    """Resolve the plan label: live profile endpoint first, credential fallback."""
+    try:
+        p = fetch_profile(token)
+        org = p.get("organization", {}) or {}
+        acct = p.get("account", {}) or {}
+        tier = org.get("rate_limit_tier", "")
+        if acct.get("has_claude_max"):
+            sub = "max"
+        elif acct.get("has_claude_pro"):
+            sub = "pro"
+        else:
+            sub = org.get("organization_type", "") or ""
+        return classify_plan(tier, sub)
+    except Exception:
+        # offline / undocumented-endpoint change / 429 → stale-but-present credential
+        return classify_plan(oauth.get("rateLimitTier", ""),
+                             oauth.get("subscriptionType", ""))
 
 
 def load_cache():
@@ -553,7 +615,9 @@ def get_usage():
         return cached["data"], cached.get("plan", ""), False
 
     try:
-        token, plan = get_credentials_info()
+        token, _ = get_credentials_info()          # token still from credential file
+        oauth = _read_credentials_raw().get("claudeAiOauth", {})
+        plan = resolve_plan(token, oauth)           # profile-first, credential fallback
         usage = fetch_usage(token)
         save_cache(usage, plan)
         return usage, plan, False
@@ -586,6 +650,7 @@ def fmt_remaining(resets_at):
 
 # ── Line 2: Usage bar ───────────────────────────────────────────────────────
 usage, plan, stale = get_usage()
+plan = _plan_override() or plan      # override beats the cached/auto-detected plan
 line2 = ""
 if usage:
     try:
