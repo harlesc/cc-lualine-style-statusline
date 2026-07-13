@@ -45,6 +45,33 @@ def get_sandbox_state():
     return False  # default: not enabled
 
 
+def _falsey(v):
+    """True if the given string is an explicit 'off' value."""
+    return str(v).strip().lower() in ("0", "false", "no", "off", "hide")
+
+
+def show_sandbox_icon():
+    """Whether to render the sandbox indicator. Default: shown.
+
+    Precedence: env var CLAUDE_STATUSLINE_SANDBOX wins, then the
+    ``show_sandbox`` key in ~/.claude/statusline.json (or $CLAUDE_CONFIG_DIR).
+    Mirrors the plan_override config pattern.
+    """
+    env = os.environ.get("CLAUDE_STATUSLINE_SANDBOX", "").strip()
+    if env:
+        return not _falsey(env)
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
+        os.path.expanduser("~"), ".claude")
+    try:
+        with open(os.path.join(os.path.expanduser(cfg), "statusline.json")) as f:
+            val = json.load(f).get("show_sandbox")
+        if val is not None:
+            return bool(val)
+    except Exception:
+        pass
+    return True  # default: show the icon
+
+
 # ── Catppuccin Mocha palette (R, G, B) ──────────────────────────────────────
 P = {
     "Mantle":   (24, 24, 37),
@@ -275,6 +302,7 @@ pct = ctx.get("used_percentage")
 total_in = ctx.get("total_input_tokens", 0) or 0
 total_out = ctx.get("total_output_tokens", 0) or 0
 model_name = data.get("model", {}).get("display_name", "")
+effort_level = (data.get("effort") or {}).get("level", "")  # low|medium|high|xhigh, absent if unsupported
 cwd = data.get("workspace", {}).get("current_dir", "")
 ver = data.get("version", "")
 cost = data.get("cost", {})
@@ -286,8 +314,9 @@ transcript_path = data.get("transcript_path", "")
 # Detect remote control
 _rc_active = _is_remote_control_active()
 
-# Detect sandbox state
-_sandbox_on = get_sandbox_state()
+# Detect sandbox state (skip entirely when the icon is disabled via config)
+_show_sandbox = show_sandbox_icon()
+_sandbox_on = get_sandbox_state() if _show_sandbox else False
 if _sandbox_on:
     _sandbox_fg = P["Green"]
     _sandbox_label = " \uf023 "   # Nerd Font lock icon
@@ -342,6 +371,11 @@ elif "haiku" in model_lower:
 else:
     model_accent = P["Green"]
 
+# ── Effort level badge colors ────────────────────────────────────────────────
+# Uniform dark chip (Surface0 bg + Text fg); the level word carries the meaning.
+EFFORT_BG = P["Surface0"]
+EFFORT_FG = P["Text"]
+
 # Context % dynamic color
 def pct_color(val):
     if val is None:
@@ -357,12 +391,17 @@ def pct_color(val):
 # Gradient: accent → Surface1 → Surface0 → Base (bright to dark, left to right)
 left1 = []
 
-# Sandbox indicator — leftmost anchor
-left1.append((_sandbox_label, model_accent if _sandbox_on else P["Red"], P["Base"], True))
+# Sandbox indicator — leftmost anchor (optional; hidden via config)
+if _show_sandbox:
+    left1.append((_sandbox_label, model_accent if _sandbox_on else P["Red"], P["Base"], True))
 
 # Model — bright accent anchor
 model_label = model_name.upper() if model_name else "CLAUDE"
 left1.append((f" {model_label} ", P["Mantle"], model_accent, True))
+
+# Effort level — sits right of the model, uniform dark chip
+if effort_level:
+    left1.append((f"  {effort_level.upper()} ", EFFORT_FG, EFFORT_BG, True))
 
 # Context progress bar — thin line style on Surface1
 pct_val = pct if pct is not None else 0

@@ -6,7 +6,7 @@ A LazyVim lualine-style powerline statusbar for Claude Code, rendered with Catpp
 
 ![Claude Code Statusline](screenshot.png)
 
-- **Line 1** — model, context window, git branch, working directory, session stats, version
+- **Line 1** — model, effort level, context window, git branch, working directory, session stats, version
 - **Line 2** — API usage with 5-hour and 7-day utilization (fetched from Anthropic API)
 - **Line 3** — loaded skills (only appears when skills are active in the session)
 
@@ -20,6 +20,7 @@ All segments use powerline arrow separators with a gradient from bright accent c
 |---------|-------------|
 | **Sandbox indicator** | Lock icon when sandbox enabled, warning triangle (red) when disabled. Reads `.claude/settings.local.json` > `.claude/settings.json` > `~/.claude/settings.json` with scope precedence. |
 | **Model indicator** | Active model name (OPUS/SONNET/HAIKU) with accent color — blue for Opus, mauve for Sonnet, teal for Haiku. |
+| **Effort level** | Reasoning effort (LOW/MEDIUM/HIGH/XHIGH) shown right of the model as a uniform dark chip — Text (`#cdd6f4`) on Surface0 (`#313244`). Read from the statusline `effort.level` field; hidden when the model doesn't support reasoning effort. |
 | **Context window** | Percentage + visual progress bar (10 chars). Color-coded: green <50%, yellow 50-80%, red >80%. |
 | **Git branch** | Current branch via `git branch --show-current`. |
 | **Working directory** | CWD with `~` prefix, abbreviated to fit 30 characters (intermediate segments shortened to first char, e.g. `~/W/t/2026-03-19-statusline`). |
@@ -109,8 +110,37 @@ Notes:
 | Environment Variable | Purpose |
 |---------------------|---------|
 | `CLAUDE_CONFIG_DIR` | Override the Claude config directory (default: `~/.claude`). Affects keychain service name, credential file path, and usage cache path. |
+| `CLAUDE_STATUSLINE_SANDBOX` | Toggle the sandbox indicator. Set to `false`/`0`/`off`/`no`/`hide` to hide it; any other value (or unset) shows it. Overrides the config file. |
+| `CLAUDE_STATUSLINE_PLAN` | Override the detected plan label on line 2 (e.g. `Max 5x`). Overrides the config file. |
 | `HOME` | Used to abbreviate CWD with `~` prefix. |
 | `COLUMNS` | Fallback terminal width when no tty is available (default: 80). |
+
+### Config File (`statusline.json`)
+
+Optional settings live in `statusline.json` inside your Claude config dir
+(`~/.claude/statusline.json`, or `$CLAUDE_CONFIG_DIR/statusline.json`). The
+matching environment variable above always wins over the file.
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
+| `show_sandbox` | bool | `true` | Show the leftmost sandbox indicator. Set to `false` to hide it. |
+| `plan_override` | string | — | Force the plan label shown on line 2. |
+
+```json
+{
+  "show_sandbox": false
+}
+```
+
+The recommended, officially-supported alternative is to set the environment
+variable in your `settings.json` `env` block, which Claude Code passes through
+to the statusline command:
+
+```json
+{
+  "env": { "CLAUDE_STATUSLINE_SANDBOX": "false" }
+}
+```
 
 ### Settings File Precedence (Sandbox)
 
