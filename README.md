@@ -59,7 +59,38 @@ Skills are extracted from the session transcript file by scanning for skill load
 - **Catppuccin Mocha palette** — full 24-color theme (Mantle through Rosewater)
 - **Powerline rendering** — right arrows (``) for left segments, left arrows (``) for right-aligned segments
 - **Terminal width detection** — tries stdio fds 2/1/0, then `/dev/tty` via `ioctl`, then process tree walk for subprocess contexts
+- **Never truncated** — lines are sized to the width Claude Code actually gives the statusline, and over-wide content degrades gracefully instead of being chopped (see [Width budget](#width-budget))
 - **ANSI true-color** — 24-bit RGB escape sequences (`\033[38;2;R;G;Bm`)
+
+### Width budget
+
+Claude Code renders the statusline inside two nested Ink boxes: the prompt row
+(`paddingLeft: 2` + `paddingRight: 2`) and the statusline's own box, whose
+`paddingX` is the `padding` value from your `statusLine` settings (Claude Code
+defaults it to `0`). The usable width is therefore:
+
+```
+terminal columns − 4 − 2 × statusLine.padding
+```
+
+Every line is an Ink `<Text wrap="truncate">`, so anything wider is cut from the
+right with an ellipsis — which eats the last segment, the version badge. The
+script reads `statusLine.padding` itself (managed → project local → project →
+user config dir, matching Claude Code's precedence) and sizes each line to that
+budget exactly.
+
+When the content still doesn't fit — a narrow terminal, a long model name — it
+degrades rather than overflowing, in this order:
+
+1. The working directory is shortened from the left (`~/s/t/…-statusline`).
+2. Left segments are dropped from the right edge — cwd, then branch, then the
+   context bar, then the effort badge.
+3. Right segments are dropped from the *left* edge — tokens, lines changed, then
+   duration.
+
+The version badge is the last thing standing. Override the reserved column count
+with `CLAUDE_STATUSLINE_RESERVE` / `width_reserve` if a future Claude Code
+version changes its chrome.
 
 ## Requirements
 
@@ -92,37 +123,6 @@ Make the script executable:
 chmod +x statusline.py
 ```
 
-## Testing / Previewing
-
-Run the script manually with mock JSON on stdin:
-
-```bash
-echo '{"model":{"display_name":"Opus"},"context_window":{"used_percentage":45,"total_input_tokens":125000,"total_output_tokens":8500},"workspace":{"current_dir":"/Users/you/project"},"version":"1.0.30","cost":{"total_duration_ms":360000,"total_lines_added":42,"total_lines_removed":7}}' | python3 statusline.py
-```
-
-Notes:
-- Line 2 (usage) fetches real API data from your Keychain credentials, so values will vary
-- Line 3 (skills) only appears when `transcript_path` is provided and contains skill markers
-- Sandbox indicator reflects your actual `.claude/settings*.json` files in the mock CWD
-
-## Configuration
-
-| Environment Variable | Purpose |
-|---------------------|---------|
-| `CLAUDE_CONFIG_DIR` | Override the Claude config directory (default: `~/.claude`). Affects keychain service name, credential file path, and usage cache path. |
-| `CLAUDE_STATUSLINE_SANDBOX` | Toggle the sandbox indicator. Set to `false`/`0`/`off`/`no`/`hide` to hide it; any other value (or unset) shows it. Overrides the config file. |
-| `CLAUDE_STATUSLINE_PLAN` | Override the detected plan label on line 2 (e.g. `Max 5x`). Overrides the config file. |
-| `HOME` | Used to abbreviate CWD with `~` prefix. |
-| `COLUMNS` | Fallback terminal width when no tty is available (default: 80). |
-
-### Config File (`statusline.json`)
-
-Optional settings live in `statusline.json` inside your Claude config dir
-(`~/.claude/statusline.json`, or `$CLAUDE_CONFIG_DIR/statusline.json`). The
-matching environment variable above always wins over the file.
-
-| Key | Type | Default | Purpose |
-|-----|------|---------|---------|
 ## Subagent Status Line (companion feature)
 
 `subagent-statusline.py` is a **separate Claude Code feature** from the main
@@ -302,8 +302,41 @@ Capture real values by pointing it at a file (e.g. via the `env` block in
 tail -f /tmp/subagent-statusline.jsonl | python3 -m json.tool
 ```
 
+## Testing / Previewing
+
+Run the script manually with mock JSON on stdin:
+
+```bash
+echo '{"model":{"display_name":"Opus"},"context_window":{"used_percentage":45,"total_input_tokens":125000,"total_output_tokens":8500},"workspace":{"current_dir":"/Users/you/project"},"version":"1.0.30","cost":{"total_duration_ms":360000,"total_lines_added":42,"total_lines_removed":7}}' | python3 statusline.py
+```
+
+Notes:
+- Line 2 (usage) fetches real API data from your Keychain credentials, so values will vary
+- Line 3 (skills) only appears when `transcript_path` is provided and contains skill markers
+- Sandbox indicator reflects your actual `.claude/settings*.json` files in the mock CWD
+
+## Configuration
+
+| Environment Variable | Purpose |
+|---------------------|---------|
+| `CLAUDE_CONFIG_DIR` | Override the Claude config directory (default: `~/.claude`). Affects keychain service name, credential file path, and usage cache path. |
+| `CLAUDE_STATUSLINE_SANDBOX` | Toggle the sandbox indicator. Set to `false`/`0`/`off`/`no`/`hide` to hide it; any other value (or unset) shows it. Overrides the config file. |
+| `CLAUDE_STATUSLINE_PLAN` | Override the detected plan label on line 2 (e.g. `Max 5x`). Overrides the config file. |
+| `CLAUDE_STATUSLINE_RESERVE` | Columns to reserve for Claude Code's own padding (see [Width budget](#width-budget)). Auto-detected as `4 + 2 × statusLine.padding`; set this only if a future version changes that chrome. Overrides the config file. |
+| `HOME` | Used to abbreviate CWD with `~` prefix. |
+| `COLUMNS` | Fallback terminal width when no tty is available (default: 80). |
+
+### Config File (`statusline.json`)
+
+Optional settings live in `statusline.json` inside your Claude config dir
+(`~/.claude/statusline.json`, or `$CLAUDE_CONFIG_DIR/statusline.json`). The
+matching environment variable above always wins over the file.
+
+| Key | Type | Default | Purpose |
+|-----|------|---------|---------|
 | `show_sandbox` | bool | `true` | Show the leftmost sandbox indicator. Set to `false` to hide it. |
 | `plan_override` | string | — | Force the plan label shown on line 2. |
+| `width_reserve` | int | auto | Columns reserved for Claude Code's padding. Auto-detected as `4 + 2 × statusLine.padding`. |
 
 ```json
 {

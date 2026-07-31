@@ -234,14 +234,137 @@ def _get_terminal_cols():
     return int(os.environ.get("COLUMNS", 80))
 
 
+# ── Usable width ─────────────────────────────────────────────────────────────
+# Claude Code renders the statusline inside two nested Ink boxes: the prompt row
+# (paddingLeft 2 + paddingRight 2) and the statusline's own box, whose paddingX
+# is `statusLine.padding` from settings (Claude Code's default is 0). Each line
+# is a <Text wrap="truncate">, so anything wider than that budget is chopped
+# from the right with an ellipsis — which eats the version badge.
+_PROMPT_CHROME = 4  # outer prompt row: paddingLeft 2 + paddingRight 2
+_MIN_GAP = 2        # minimum blank columns between the left and right groups
+
+
+def _statusline_padding():
+    """Effective ``statusLine.padding``, mirroring Claude Code's own lookup.
+
+    Higher-precedence scopes replace the whole ``statusLine`` object rather than
+    merging into it, so the first file that defines the block wins. Absent
+    entirely, Claude Code falls back to a padding of 0.
+    """
+    cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
+        os.path.expanduser("~"), ".claude")
+    cwd = os.getcwd()
+    for path in (
+        "/Library/Application Support/ClaudeCode/managed-settings.json",
+        os.path.join(cwd, ".claude/settings.local.json"),
+        os.path.join(cwd, ".claude/settings.json"),
+        os.path.join(os.path.expanduser(cfg), "settings.json"),
+    ):
+        try:
+            with open(path) as f:
+                block = json.load(f).get("statusLine")
+        except Exception:
+            continue
+        if isinstance(block, dict):
+            try:
+                return max(0, int(block.get("padding", 0)))
+            except (TypeError, ValueError):
+                return 0
+    return 0
+
+
+def _reserve_override():
+    """Manual override for the reserved columns: env var wins, then config."""
+    v = os.environ.get("CLAUDE_STATUSLINE_RESERVE", "").strip()
+    if not v:
+        cfg = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(
+            os.path.expanduser("~"), ".claude")
+        try:
+            with open(os.path.join(os.path.expanduser(cfg), "statusline.json")) as f:
+                v = json.load(f).get("width_reserve")
+        except Exception:
+            return None
+    try:
+        return max(0, int(v))
+    except (TypeError, ValueError):
+        return None
+
+
+_USABLE_COLS = None
+
+def usable_cols():
+    """Columns a rendered line may occupy before Claude Code truncates it."""
+    global _USABLE_COLS
+    if _USABLE_COLS is None:
+        reserve = _reserve_override()
+        if reserve is None:
+            reserve = _PROMPT_CHROME + 2 * _statusline_padding()
+        _USABLE_COLS = max(20, _get_terminal_cols() - reserve)
+    return _USABLE_COLS
+
+
+def _seg_key(seg):
+    """Optional 5th tuple element naming a segment, used by the overflow policy."""
+    return seg[4] if len(seg) > 4 else ""
+
+
+def _fit_groups(left, right, cols, right_render):
+    """Trim segments until both groups fit `cols` columns with a gap between.
+
+    Claude Code truncates an over-wide line from the right, which would eat the
+    version badge, so give ground on the left first: shorten the cwd, then drop
+    left segments from the right edge (cwd, branch, bar …). Only as a last
+    resort drop right segments from the *left* edge, so the tail survives.
+    """
+    left, right = list(left), list(right)
+
+    def over():
+        lw = visible_len(render_powerline(left)) if left else 0
+        rw = visible_len(right_render(right)) if right else 0
+        return lw + rw + _MIN_GAP - cols
+
+    excess = over()
+    if excess <= 0:
+        return left, right
+
+    # 1. Shorten the working directory, keeping its most specific tail.
+    for i, seg in enumerate(left):
+        if _seg_key(seg) != "cwd":
+            continue
+        core = seg[0].strip()
+        keep = visible_len(core) - excess - 1
+        if keep >= 3:
+            left[i] = (f" …{core[-keep:]} ",) + tuple(seg[1:])
+        else:
+            left.pop(i)
+        break
+
+    # 2. Drop left segments from the right edge.
+    while over() > 0 and len(left) > 1:
+        left.pop()
+
+    # 3. Last resort: drop right segments from the left edge.
+    while over() > 0 and len(right) > 1:
+        right.pop(0)
+
+    return left, right
+
+
 def render_two_groups(left, right, right_align=False, right_renderer=None, gap_bg=None):
     """Render left and right segment groups separated by a gap.
 
-    If right_align=True, pad with spaces to push the right group flush-right.
+    If right_align=True, the groups are first trimmed to the usable width — so
+    Claude Code never has to truncate the line — then padded apart to sit
+    flush-right.
     right_renderer overrides render_powerline for the right group (e.g. reverse arrows).
     gap_bg fills the gap between groups with a background color.
     """
     right_render = right_renderer or render_powerline
+
+    if right_align:
+        cols = usable_cols()
+        left, right = _fit_groups(left, right, cols, right_render)
+
     left_str = render_powerline(left, tail_bg=gap_bg) if left else ""
     if right:
         if right_renderer:
@@ -252,9 +375,8 @@ def render_two_groups(left, right, right_align=False, right_renderer=None, gap_b
         right_str = ""
 
     if right_align:
-        cols = _get_terminal_cols() - 5
         gap = cols - visible_len(left_str) - visible_len(right_str)
-        gap_str = " " * max(gap, 2)
+        gap_str = " " * max(gap, _MIN_GAP)
         if gap_bg:
             gap_str = f"{bg(gap_bg)}{gap_str}{RST}"
         return left_str + gap_str + right_str
@@ -419,9 +541,9 @@ left1.append((bar_text, None, P["Surface1"]))
 if branch:
     left1.append((f" \ue0a0 {branch} ", P["Lavender"], P["Surface0"]))
     if cwd:
-        left1.append((f" {cwd} ", P["Subtext0"], P["Base"]))
+        left1.append((f" {cwd} ", P["Subtext0"], P["Base"], False, "cwd"))
 elif cwd:
-    left1.append((f" {cwd} ", P["Subtext0"], P["Surface0"]))
+    left1.append((f" {cwd} ", P["Subtext0"], P["Surface0"], False, "cwd"))
 
 # Build right segments (text + fg only), then assign gradient backgrounds
 # Gradient (left to right): darkest → brightest → accent
@@ -772,7 +894,7 @@ loaded_skills = _get_loaded_skills(transcript_path)
 line3 = ""
 if loaded_skills:
     try:
-        cols = _get_terminal_cols() - 5
+        cols = usable_cols()
         # Build segments: label + skill names with dividers
         left3 = []
         left3.append((" SKILLS ", P["Mantle"], P["Overlay0"], True))

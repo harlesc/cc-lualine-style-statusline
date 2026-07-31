@@ -7,20 +7,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
 
 ## [Unreleased]
 
+### Fixed
+
+- Version badge no longer truncated off the right edge (`󰏗 2.1.…`). Right-aligned
+  lines were padded to `terminal width − 5`, but Claude Code renders the
+  statusline inside two nested Ink boxes — the prompt row (`paddingLeft: 2` +
+  `paddingRight: 2`) and the statusline's own box (`paddingX: statusLine.padding`)
+  — so the real budget is `width − 4 − 2 × padding`. With the documented
+  `"padding": 2` that is `width − 8`, leaving every line 3 columns too wide;
+  Ink's `<Text wrap="truncate">` then chopped the tail and appended an ellipsis,
+  and the tail is the version badge. The script now reads `statusLine.padding`
+  itself (managed → project local → project → user config dir, matching Claude
+  Code's precedence) and sizes each line to the exact budget. `statusLine.padding`
+  is honoured for the skills bar (line 3) too, which had the same `− 5`.
+
+- Over-wide content now degrades instead of being truncated. When the segments
+  can't fit — narrow terminal, long model name such as `OPUS 5 (1M CONTEXT)` —
+  the cwd is shortened from the left, then left segments are dropped from the
+  right edge (cwd → branch → context bar → effort), and only then are right
+  segments dropped from the *left* edge (tokens → lines → duration). The version
+  badge survives to the last. Added `CLAUDE_STATUSLINE_RESERVE` (and a
+  `width_reserve` config key) to override the reserved column count if a future
+  Claude Code version changes its chrome.
+
 ### Added
 
-- Optional sandbox indicator. The leftmost sandbox icon can now be hidden via
-  config: set `CLAUDE_STATUSLINE_SANDBOX` to `false`/`0`/`off` (recommended via
-  the `env` block in `settings.json`), or add `{"show_sandbox": false}` to
-  `~/.claude/statusline.json`. The env var wins over the file; the icon is shown
-  by default. When hidden, sandbox detection is skipped entirely.
-
-- Effort level badge on line 1, shown right of the model name and before the
-  context window. Reads the `effort.level` field from the statusline JSON
-  (`low`/`medium`/`high`/`xhigh`). Rendered as a uniform dark chip — Text
-  (`#cdd6f4`) on Surface0 (`#313244`) — so it stays distinct from the colored
-  model badge; the level word carries the meaning. The badge is hidden when the
-  current model doesn't support reasoning effort.
 - Companion subagent status line (`subagent-statusline.py`). This is a *separate*
   Claude Code feature from the main `statusLine` — it is wired via the
   `subagentStatusLine` setting and renders a custom row body for each subagent
@@ -56,3 +67,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/).
   `CLAUDE_SUBAGENT_STATUSLINE_DEBUG` env var (append each raw stdin payload to a
   file) that was used to confirm all of this.
 
+- Optional sandbox indicator. The leftmost sandbox icon can now be hidden via
+  config: set `CLAUDE_STATUSLINE_SANDBOX` to `false`/`0`/`off` (recommended via
+  the `env` block in `settings.json`), or add `{"show_sandbox": false}` to
+  `~/.claude/statusline.json`. The env var wins over the file; the icon is shown
+  by default. When hidden, sandbox detection is skipped entirely.
+
+- Effort level badge on line 1, shown right of the model name and before the
+  context window. Reads the `effort.level` field from the statusline JSON
+  (`low`/`medium`/`high`/`xhigh`). Rendered as a uniform dark chip — Text
+  (`#cdd6f4`) on Surface0 (`#313244`) — so it stays distinct from the colored
+  model badge; the level word carries the meaning. The badge is hidden when the
+  current model doesn't support reasoning effort.
