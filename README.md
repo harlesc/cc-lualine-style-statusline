@@ -123,6 +123,50 @@ Make the script executable:
 chmod +x statusline.py
 ```
 
+### Windows setup
+
+Windows is supported (`fcntl`/`termios` are guarded behind `os.name == "posix"`,
+`pgrep`-based remote-control detection is a no-op, and stdout is reconfigured
+to UTF-8 for the Nerd Font glyphs), but the `statusLine.command` path needs
+care:
+
+Claude Code runs `statusLine` commands through **Git Bash** on Windows when
+it's installed (which is common, since it ships with Git for Windows), and
+only falls back to PowerShell when Git Bash is absent. Git Bash treats
+unquoted backslashes as escape characters, so a Windows-style path like
+`C:\Users\you\statusline.py` gets silently mangled — the command fails with
+**no visible error** in the UI.
+
+**Use forward slashes in the command path**, even on Windows:
+
+```json
+{
+  "statusLine": {
+    "type": "command",
+    "command": "C:/Python/python.exe C:/Users/you/statusline.py",
+    "padding": 2
+  }
+}
+```
+
+If the statusline still doesn't appear after that, run the exact `command`
+string through `bash -c "<command>"` yourself — it reproduces the same
+mangled-path failure Claude Code hits silently, and will show you the real
+error (e.g. `command not found`) instead of a blank status bar.
+
+### Troubleshooting
+
+- **Statusline shows nothing, no error**: on Windows, check that `command`
+  uses forward slashes (see [Windows setup](#windows-setup) above) — this is
+  the most common cause.
+- **`ModuleNotFoundError: No module named 'fcntl'`**: you're on a version of
+  this script older than the Windows compatibility patch; pull the latest.
+- **Confirm the command Claude Code will actually run**: pipe mock JSON into
+  it directly, exactly as documented in Claude Code's own troubleshooting
+  guide — `echo '{"model":{"display_name":"Opus"}}' | python statusline.py`
+  (or, to mimic Windows' Git Bash routing exactly, wrap it in
+  `bash -c "..."`).
+
 ## Subagent Status Line (companion feature)
 
 `subagent-statusline.py` is a **separate Claude Code feature** from the main
