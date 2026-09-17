@@ -97,6 +97,8 @@ version changes its chrome.
 - Python 3.6+
 - A terminal with true-color (24-bit) support
 - A [Nerd Font](https://www.nerdfonts.com/) for powerline separators and icons
+  (on Windows, see [Windows setup](#windows-setup) for a winget install and
+  Windows Terminal font-face steps)
 - `git` on PATH (for branch detection)
 - `pgrep` on PATH (for remote control detection)
 - macOS Keychain access (for usage data on macOS) or `.credentials.json` (Linux)
@@ -154,11 +156,36 @@ string through `bash -c "<command>"` yourself — it reproduces the same
 mangled-path failure Claude Code hits silently, and will show you the real
 error (e.g. `command not found`) instead of a blank status bar.
 
+**Nerd Font glyphs render as `◆` boxes**: Windows Terminal's default font
+(Cascadia Mono) doesn't include the Nerd Font icon glyphs, so icons fall back
+to a placeholder diamond even once the statusline itself is working. Install
+one via winget and set it as your terminal profile's font:
+
+```powershell
+winget install --id DEVCOM.JetBrainsMonoNerdFont --source winget
+```
+
+Then, in Windows Terminal, open **Settings → your profile → Appearance →
+Font face** and pick **`JetBrainsMono NFM`** (the `NFM`/mono variant keeps
+icon glyphs a fixed single-column width, which lines up better than the
+plain `NF` variant). Or edit `settings.json` directly:
+
+```json
+{
+  "font": { "face": "JetBrainsMono NFM" }
+}
+```
+
+added under the relevant entry in `profiles.list`. Restart the tab afterward.
+
 ### Troubleshooting
 
 - **Statusline shows nothing, no error**: on Windows, check that `command`
   uses forward slashes (see [Windows setup](#windows-setup) above) — this is
   the most common cause.
+- **Icons show as `◆`/boxes instead of glyphs**: your terminal font doesn't
+  include Nerd Font glyphs. Install one (see [Windows setup](#windows-setup))
+  and set it as the terminal's font face.
 - **`ModuleNotFoundError: No module named 'fcntl'`**: you're on a version of
   this script older than the Windows compatibility patch; pull the latest.
 - **Confirm the command Claude Code will actually run**: pipe mock JSON into
