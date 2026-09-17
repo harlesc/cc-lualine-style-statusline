@@ -3,12 +3,29 @@
 
 Renders two or three lines with Catppuccin Mocha colors and powerline arrow separators.
 """
-import fcntl, hashlib, json, os, re, struct, subprocess, sys, termios, time, unicodedata
+import hashlib, json, os, re, subprocess, sys, time, unicodedata
 from datetime import datetime, timezone
 from urllib.request import Request, urlopen
 
+if os.name == "posix":
+    import fcntl, struct, termios
+else:
+    fcntl = struct = termios = None
+    # Windows consoles often default stdout to a legacy codepage (cp1252) when
+    # not attached to a real console, which can't encode the Nerd Font glyphs.
+    try:
+        sys.stdout.reconfigure(encoding="utf-8")
+    except Exception:
+        pass
+
+
 def _is_remote_control_active():
-    """Check if Claude Code remote control is active by looking for the process."""
+    """Check if Claude Code remote control is active by looking for the process.
+
+    `pgrep` doesn't exist on Windows, so this is always False there.
+    """
+    if os.name != "posix":
+        return False
     try:
         result = subprocess.check_output(
             ["pgrep", "-f", "claude.*remote-control"],
@@ -194,6 +211,11 @@ def _get_terminal_cols():
             return os.get_terminal_size(fd_num).columns
         except (OSError, ValueError):
             pass
+
+    if os.name != "posix":
+        # Windows: no /dev/tty, no /proc — fall through to COLUMNS below.
+        return int(os.environ.get("COLUMNS", 80))
+
     # macOS / any POSIX: open /dev/tty directly (works in subprocess contexts)
     try:
         fd = os.open("/dev/tty", os.O_RDONLY | os.O_NOCTTY)
